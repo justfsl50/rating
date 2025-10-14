@@ -12,7 +12,7 @@ const { ParticipantsModel } = require("./models/participantsModels");
 const User = require("./models/userModel");
 const auth = require("./middleware/auth");
 
-const PORT = process.env.PORT || 3000;
+const PORT = parseInt(process.env.PORT) || 3000;
 const MONGO_URL = process.env.MONGO_URL;
 const NODE_ENV = process.env.NODE_ENV || "development";
 
@@ -190,8 +190,6 @@ app.get("/", (req, res) => {
 const connectDB = async () => {
   try {
     await mongoose.connect(MONGO_URL, { 
-      useNewUrlParser: true, 
-      useUnifiedTopology: true,
       serverSelectionTimeoutMS: 5000,
     });
     console.log("✅ MongoDB connected successfully");

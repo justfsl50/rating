@@ -19,8 +19,16 @@ const NODE_ENV = process.env.NODE_ENV || "development";
 // Initialize Express app
 const app = express();
 
+// Memory optimization for Render free tier
+if (global.gc) {
+  setInterval(() => {
+    global.gc();
+  }, 60000); // Force garbage collection every 60 seconds
+}
+
 // Middleware
-app.use(bodyParser.json());
+app.use(bodyParser.json({ limit: '500kb' })); // Reduced limit to save memory
+app.use(bodyParser.urlencoded({ limit: '500kb', extended: true }));
 
 // CORS configuration - update with your frontend URL for production
 const allowedOrigins = [
@@ -191,31 +199,70 @@ app.get("/", (req, res) => {
 // --- Database Connection & Server Start ---
 const connectDB = async () => {
   try {
+    if (!MONGO_URL) {
+      throw new Error("MONGO_URL environment variable is not defined");
+    }
+    
+    console.log("🔄 Connecting to MongoDB...");
+    console.log("📍 MongoDB Host:", MONGO_URL.split('@')[1]?.split('/')[0] || 'hidden');
+    
     await mongoose.connect(MONGO_URL, { 
-      serverSelectionTimeoutMS: 5000,
+      serverSelectionTimeoutMS: 30000, // Increased to 30 seconds
+      socketTimeoutMS: 45000,
+      connectTimeoutMS: 30000,
+      maxPoolSize: 5, // Reduced pool size to save memory
+      minPoolSize: 1,
+      retryWrites: true,
+      w: 'majority',
+      family: 4 // Force IPv4
     });
+    
     console.log("✅ MongoDB connected successfully");
+    console.log("📊 Database:", mongoose.connection.db.databaseName);
   } catch (err) {
-    console.error("❌ MongoDB connection error:", err);
+    console.error("❌ MongoDB connection error:", err.message);
+    console.error("💡 Troubleshooting:");
+    console.error("  1. Check MongoDB Atlas IP whitelist (add 0.0.0.0/0 for Render)");
+    console.error("  2. Verify cluster is not paused (free tier sleeps after inactivity)");
+    console.error("  3. Confirm credentials in MONGO_URL are correct");
+    console.error("  4. Check network connectivity to MongoDB Atlas");
     process.exit(1);
   }
 };
 
 // Start server
 connectDB().then(() => {
-  app.listen(PORT, "0.0.0.0", () => {
+  const server = app.listen(PORT, "0.0.0.0", () => {
     console.log(`🚀 Server running on port ${PORT}`);
     console.log(`📍 Environment: ${NODE_ENV}`);
+    console.log(`💾 Memory usage: ${Math.round(process.memoryUsage().heapUsed / 1024 / 1024)}MB`);
   });
+  
+  // Set server timeout
+  server.timeout = 30000; // 30 seconds
+}).catch(err => {
+  console.error("❌ Failed to start server:", err.message);
+  process.exit(1);
 });
 
 // Graceful shutdown
 process.on("SIGTERM", () => {
-  console.log("SIGTERM signal received: closing HTTP server");
+  console.log("📴 SIGTERM signal received: closing HTTP server");
   mongoose.connection.close(false, () => {
-    console.log("MongoDB connection closed");
+    console.log("✅ MongoDB connection closed");
     process.exit(0);
   });
+});
+
+// Handle uncaught exceptions
+process.on("uncaughtException", (err) => {
+  console.error("❌ Uncaught Exception:", err.message);
+  process.exit(1);
+});
+
+process.on("unhandledRejection", (reason, promise) => {
+  console.error("❌ Unhandled Rejection at:", promise, "reason:", reason);
+  process.exit(1);
 });
 
 module.exports = app;
